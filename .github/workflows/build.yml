@@ -1,15 +1,14 @@
 name: Build-OpenWrt-EasyTier
 
 on:
-  #push:
   workflow_dispatch:
     inputs:
       tag:
-        description: '请填写发布Releases的版本号（留空不发布）'
+        description: 'v2.4.5'
         required: false
         default: ''
       text:
-        description: '请填写发布的说明'
+        description: 'luci-app-easytier'
         required: false
         default: ''
 concurrency:
@@ -18,6 +17,9 @@ concurrency:
 env:
   TAG: "${{ github.event.inputs.tag }}"
   TZ: Asia/Shanghai
+  # 关键修改：ARCH 改为 target-subtarget 格式（如 x86-64），SDK版本通过 VERSION 单独指定
+  ARCH: ${{ matrix.arch }}
+  VERSION: ${{ matrix.sdk }}
 permissions:
   contents: write
 jobs:
@@ -27,8 +29,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # 关键修改：调整架构为 OpenWrt 标准的 target-subtarget 格式
         arch:
-          - aarch64_cortex-a53
+          - aarch64_cortex-a53  # 保持其他架构（若需兼容）
           - aarch64_cortex-a72
           - aarch64_generic
           - arm_arm1176jzf-s_vfp
@@ -42,19 +45,17 @@ jobs:
           - arm_cortex-a9_neon
           - arm_cortex-a9_vfpv3-d16
           - arm_fa526
-          #- arm_mpcore
           - arm_xscale
           - mips_24kc
-          #- mips_4kec
           - mips_mips32
           - mipsel_24kc
           - mipsel_24kc_24kf
           - mipsel_74kc
           - mipsel_mips32
-          - x86_64
+          - x86-64  # x86 64位架构的标准 target-subtarget（关键修改）
           
         sdk:
-          - 22.03.7
+          - 22.07.7  # SDK版本
           - SNAPSHOT
 
     steps:
@@ -65,6 +66,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
+            # 缓存路径调整为正确的架构格式（x86-64 而非 x86_64）
             /opt/openwrt-sdk-${{ matrix.arch }}-${{ matrix.sdk }}
             dl
           key: sdk-${{ matrix.arch }}-${{ matrix.sdk }}
@@ -79,10 +81,11 @@ jobs:
       - name: Building packages
         uses: openwrt/gh-action-sdk@main
         env:
-          ARCH: ${{ matrix.arch }}-${{ matrix.sdk }}
+          # 传递正确的 ARCH（target-subtarget）和 VERSION（SDK版本）
+          ARCH: ${{ env.ARCH }}
+          VERSION: ${{ env.VERSION }}
           FEEDNAME: packages_ci
           PACKAGES: easytier luci-app-easytier
-          #NO_DEFAULT_FEEDS: 1
           NO_REFRESH_CHECK: 1
           NO_SHFMT_CHECK: 1
           MAKEFLAGS: -j$(nproc)
@@ -92,13 +95,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EasyTier-${{ matrix.arch }}-${{ matrix.sdk }}
+          # 路径中的架构部分使用调整后的 matrix.arch（x86-64）
           path: bin/packages/${{ matrix.arch }}/packages_ci/
 
       - name: Create compress files
         run: |
           sudo timedatectl set-timezone "Asia/Shanghai"
           echo "build_time=$(TZ=UTC-8 date '+%Y年%m月%d日%H:%M:%S' | jq -sRr @uri)" >> $GITHUB_ENV
-          #tar -zcvf EasyTier-${{ matrix.sdk }}-${{ matrix.arch }}.tar.gz -C bin/packages/${{ matrix.arch }}/ packages_ci
           zip -j EasyTier-${{ env.TAG }}-${{ matrix.arch }}-${{ matrix.sdk }}.zip bin/packages/${{ matrix.arch }}/packages_ci/*
 
       - name: Release
@@ -107,16 +110,9 @@ jobs:
         with:
             token: ${{ secrets.GITHUB_TOKEN }}
             body: |
-
              > ### ![](https://img.shields.io/badge/%E7%BC%96%E8%AF%91%E6%97%B6%E9%97%B4-${{ env.build_time }}-easytier?logo=github&labelColor=%E9%A1%BB)![](https://img.shields.io/github/downloads/${{ github.repository }}/${{ env.TAG }}/total?label=%E4%B8%8B%E8%BD%BD%E6%AC%A1%E6%95%B0&logo=github)
-
-             - 其中 **`22.03.7`** 里面是ipk安装包 **`SNAPSHOT`** 里面是apk安装包
-
-             - **`*.apk` 是OpenWrt新版的APK包** 对于apk包跳过证书命令
-             `apk add --allow-untrusted luci-app-easytier.apk`
-
+             - 其中 **`22.07.7`** 里面是ipk安装包 **`SNAPSHOT`** 里面是开发版安装包
+             - 安装命令：`opkg install --force-depends luci-app-easytier_*.ipk`
              ${{ github.event.inputs.text }}
-           
             tag_name: ${{ env.TAG }}
             files: EasyTier-${{ env.TAG }}-${{ matrix.arch }}-${{ matrix.sdk }}.zip
- 
